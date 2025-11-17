@@ -1,5 +1,6 @@
 import Navbar from './Navbar';
 import OfficialAlerts from './OfficialAlerts';
+import EmergencyResources from './EmergencyResources'; // <-- RE-IMPORT THIS
 
 export default function Layout({ children }) {
   return (
@@ -15,17 +16,17 @@ export default function Layout({ children }) {
       <div className="flex flex-1 overflow-hidden">
         
         {/* --- SIDEBAR --- */}
-        <div className="w-full md:w-1/4 lg:w-1/5 h-full overflow-y-auto p-4 bg-slate-800 border-r border-slate-700">
+        {/* We use space-y-6 to add spacing between our panels */}
+        <div className="w-full md:w-1/4 lg:w-1/5 h-full overflow-y-auto p-4 bg-slate-800 border-r border-slate-700 space-y-6">
           
-          {/* Component for Login/Register/User links */}
-          {/* Added consistent margin-bottom */}
-          <div className="mb-6">
-            <Navbar />
-          </div>
+          {/* Panel 1: Login/Nav links */}
+          <Navbar />
 
-          {/* --- OFFICIAL ALERTS PANEL --- */}
-          {/* This component already has its own margins */}
+          {/* Panel 2: Official Alerts (IMD) */}
           <OfficialAlerts />
+
+          {/* Panel 3: Static Emergency Helplines */}
+          <EmergencyResources />
 
         </div>
 

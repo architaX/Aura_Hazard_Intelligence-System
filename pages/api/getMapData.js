@@ -14,8 +14,7 @@ export default async function handler(req, res) {
     const client = await clientPromise;
     const db = client.db('AuraDB');
     
-    // --- THIS IS THE FINAL LOGIC ---
-    // We now ONLY fetch reports that are:
+    // --- STEP 1: Find all reports that are... ---
     // 1. 'verified'
     // 2. AND their 'expiresAt' date is in the future
     const reportsFromDb = await db
@@ -25,29 +24,23 @@ export default async function handler(req, res) {
         expiresAt: { $gt: new Date() } // $gt means "greater than"
       })
       .sort({ createdAt: -1 })
-      .limit(50) 
+      .limit(100) // Get up to 100 active reports
       .toArray();
-    // --- END OF FINAL LOGIC ---
 
-    const reportsForMap = reportsFromDb.map(report => {
-      let hazardType = 'Unknown'; 
-      if (report.aiVerification && Array.isArray(report.aiVerification.labels) && report.aiVerification.labels.length > 0) {
-        hazardType = report.aiVerification.labels[0];
-        hazardType = hazardType.charAt(0).toUpperCase() + hazardType.slice(1); 
-      } else if (report.source === 'IMD_NOWCAST') {
-        hazardType = 'Weather Alert';
-      }
-      
-      if (!report.location) return null;
+    // --- STEP 2: Format the data for the map ---
+    // We only send the data the map *needs*
+    const reportsForMap = reportsFromDb
+      .filter(report => report.location && report.location.coordinates) // Only include reports that HAVE a location
+      .map(report => {
+        return {
+          _id: report._id,
+          description: report.description,
+          location: report.location, // e.g., { type: 'Point', coordinates: [lng, lat] }
+          hazardType: report.hazardType || 'OTHER', // The type from our NLP
+        };
+      });
 
-      return {
-        _id: report._id,
-        description: report.description,
-        location: report.location,
-        hazardType: hazardType,
-      };
-    }).filter(report => report !== null);
-
+    // --- STEP 3: Send the clean data ---
     res.status(200).json(reportsForMap);
 
   } catch (error) {

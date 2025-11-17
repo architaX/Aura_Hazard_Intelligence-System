@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Tooltip, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useSession } from 'next-auth/react'; // Import useSession to check login status
+import { useSession } from 'next-auth/react'; // We need this for the voting buttons
 
-// Fix for default marker icon
+// Use default Leaflet icon
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
@@ -12,11 +12,64 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
-// --- NEW COMPONENT TO RENDER MARKERS ---
+// --- Sub-Component for Nearby Resources ---
+function NearbyResources({ location }) {
+  const [resources, setResources] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasFetched, setHasFetched] = useState(false);
+
+  const findHelp = async () => {
+    if (hasFetched || isLoading) return;
+    setIsLoading(true);
+    setHasFetched(true);
+    
+    const [lng, lat] = location.coordinates;
+    
+    try {
+      const response = await fetch(`/api/getNearbyResources?lat=${lat}&lng=${lng}`);
+      const data = await response.json();
+      setResources(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 pt-2 border-t">
+      {!hasFetched && (
+        <button
+          onClick={findHelp}
+          className="w-full px-2 py-1 text-xs text-white bg-blue-500 rounded hover:bg-blue-600"
+        >
+          Find Nearby Help
+        </button>
+      )}
+      {isLoading && <p className="text-xs text-gray-500">Finding help...</p>}
+      
+      {!isLoading && hasFetched && (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-gray-700">Nearest Resources:</p>
+          {resources.length > 0 ? (
+            resources.map(res => (
+              <div key={res._id}>
+                <p className="text-xs text-black">{res.name} ({res.type})</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-gray-500">No resources found nearby.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Main Marker Component ---
 function ShowMarkers({ reports }) {
-  const map = useMap();
-  const { data: session } = useSession(); // Get user session
-  const [message, setMessage] = useState({}); // To show feedback per-marker
+  const { data: session } = useSession(); // Get user session for voting
+  const [message, setMessage] = useState({}); // To show voting feedback
 
   // --- "Still Here?" button click handler ---
   const handleBump = async (reportId) => {
@@ -41,7 +94,6 @@ function ShowMarkers({ reports }) {
     });
     const data = await response.json();
     setMessage({ ...message, [reportId]: data.message });
-    // No need to hide, the pin will disappear on next refresh if resolved
   };
 
   return (
@@ -59,12 +111,17 @@ function ShowMarkers({ reports }) {
               report.location.coordinates[0]  // Lng
             ]}
           >
+            {/* --- THIS POPUP NOW CONTAINS BOTH FEATURES --- */}
             <Popup>
               <div className="w-48">
+                {/* --- Feature 1: Hazard Info --- */}
                 <strong className="text-lg">{report.hazardType || 'Hazard'}:</strong>
                 <p className="my-1">{report.description}</p>
                 
-                {/* --- Community Voting Buttons --- */}
+                {/* --- Feature 2: Dynamic Nearby Resources --- */}
+                <NearbyResources location={report.location} />
+
+                {/* --- Feature 3: Community Voting --- */}
                 <div className="mt-2 pt-2 border-t">
                   <p className="text-xs text-gray-600 mb-2">
                     Is this hazard still here?
@@ -98,6 +155,13 @@ function ShowMarkers({ reports }) {
                 </div>
               </div>
             </Popup>
+            
+            <Tooltip>
+              <strong>{report.hazardType || 'Hazard'}:</strong>
+              <br/>
+              {report.description}
+            </Tooltip>
+
           </Marker>
         );
       })}
@@ -105,10 +169,10 @@ function ShowMarkers({ reports }) {
   );
 }
 
-// --- MAIN MAP COMPONENT (no changes) ---
+// --- Main Map Component (no changes) ---
 export default function Map() {
   const [reports, setReports] = useState([]);
-  const position = [12.9716, 77.5946]; // Default: Bengaluru
+  const position = [12.9716, 77.5946]; 
 
   useEffect(() => {
     async function fetchData() {
@@ -120,9 +184,8 @@ export default function Map() {
         console.error('Error fetching map data:', error);
       }
     }
-    // Auto-refresh the map every 30 seconds
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    const interval = setInterval(fetchData, 30000); // Auto-refresh map
     return () => clearInterval(interval);
   }, []);
 

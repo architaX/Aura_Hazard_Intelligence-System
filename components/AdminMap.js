@@ -1,4 +1,4 @@
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Tooltip } from 'react-leaflet'; // <-- Import Tooltip
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -10,18 +10,14 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
-// Helper function to get the right color for the map
+// Function to get the status color
 const getStatusColor = (status) => {
   switch (status) {
-    case 'pending':
-      return 'orange';
-    case 'verified':
-      return 'green';
+    case 'pending': return 'orange';
+    case 'verified': return 'green';
     case 'resolved':
-    case 'rejected':
-      return 'grey';
-    default:
-      return 'blue';
+    case 'rejected': return 'grey';
+    default: return 'blue';
   }
 };
 
@@ -43,8 +39,6 @@ export default function AdminMap({ reports }) {
         if (!report.location || !report.location.coordinates) {
           return null;
         }
-
-        // --- UPDATED: Use the color function ---
         const color = getStatusColor(report.status);
 
         return (
@@ -54,7 +48,16 @@ export default function AdminMap({ reports }) {
               report.location.coordinates[1], // Lat
               report.location.coordinates[0]  // Lng
             ]}
+            // The 'icon' prop is GONE. We are using the default pin.
           >
+            {/* --- NEW: Add a Tooltip for hover --- */}
+            <Tooltip>
+              <strong>{report.hazardType || 'Hazard'} ({report.status})</strong>
+              <br/>
+              {report.description}
+            </Tooltip>
+
+            {/* --- We keep the Popup for admin actions --- */}
             <Popup>
               <strong>{report.status.toUpperCase()}:</strong>
               <br/>

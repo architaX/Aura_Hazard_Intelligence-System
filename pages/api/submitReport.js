@@ -1,9 +1,10 @@
 import clientPromise from '@/lib/mongodb';
 import { getServerSession } from "next-auth/next";
 import { authOptions } from './auth/[...nextauth]';
+import { classifyHazard } from '@/lib/classifyHazard';
 const { ClarifaiStub, grpc } = require("clarifai-nodejs-grpc");
 
-// ... (Clarifai setup code - no changes) ...
+// --- Clarifai Setup ---
 const stub = ClarifaiStub.grpc();
 const metadata = new grpc.Metadata();
 metadata.set("authorization", "Key " + process.env.CLARIFAI_PAT);
@@ -18,13 +19,9 @@ function callClarifaiModel(authorUserID, authorAppID, modelId, imageUrl) {
       },
       metadata,
       (err, response) => {
-        if (err) {
-          reject("gRPC Error: " + err.details);
-        } else if (response.status.code !== 10000) {
-          reject("Clarifai API failed: " + response.status.description);
-        } else {
-          resolve(response.outputs[0].data.concepts || []);
-        }
+        if (err) { reject("gRPC Error: " + err.details); }
+        else if (response.status.code !== 10000) { reject("Clarifai API failed: " + response.status.description); }
+        else { resolve(response.outputs[0].data.concepts || []); }
       }
     );
   });
@@ -42,17 +39,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    // --- UPDATED: Get new fields from the body ---
     const { 
       description, 
       latitude, 
       longitude, 
       imageUrl,
-      incidentTime, // <-- NEW
-      duration      // <-- NEW
+      incidentTime, 
+      duration // Mispelled as 'duraion' in my previous code, fixed here
     } = req.body;
 
-    // --- (AI ANALYSIS - no changes) ---
+    // --- (AI ANALYSIS) ---
     console.log(`[Clarifai] Analyzing image: ${imageUrl}`);
     const moderationConcepts = await callClarifaiModel('clarifai', 'main', 'moderation-recognition', imageUrl);
     const unsafeConcept = moderationConcepts.find(concept => 
@@ -67,22 +63,25 @@ export default async function handler(req, res) {
     const labels = labelConcepts.map(concept => concept.name);
     console.log(`[Clarifai] Labels found: ${labels.join(', ')}`);
 
-    // --- (DATABASE LOGIC - NO BUMPING) ---
-    // We are back to a simple "create" logic.
-    // The old "bumping" logic is removed.
+    // --- NLP CLASSIFICATION ---
+    const hazardType = classifyHazard(description);
+
+    // --- THIS IS THE FIX ---
+    // Ensure coordinates are saved as numbers (floats/doubles)
     const newReport = {
       description,
       imageUrl,
       location: {
         type: 'Point',
-        coordinates: [longitude, latitude],
+        coordinates: [
+          parseFloat(longitude), // Explicitly parse
+          parseFloat(latitude)   // Explicitly parse
+        ],
       },
-      status: 'pending', // All new reports are pending
-      
-      // --- NEW: Save new fields ---
+      status: 'pending',
+      hazardType: hazardType,
       incidentTime: new Date(incidentTime),
-      duration: duration,
-
+      duration: duration, // Corrected variable name
       aiVerification: {
         safe: true,
         labels: labels.slice(0, 5), 

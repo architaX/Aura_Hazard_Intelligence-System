@@ -3,7 +3,6 @@ import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 
-// --- Set the refresh interval: 30 seconds ---
 const REFRESH_INTERVAL_MS = 30 * 1000; // 30 seconds
 
 export default function AdminDashboard() {
@@ -13,8 +12,10 @@ export default function AdminDashboard() {
   const [reports, setReports] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState('');
 
-  // AdminMap component is loaded dynamically
   const AdminMap = useMemo(() => dynamic(
     () => import('@/components/AdminMap'),
     { 
@@ -23,45 +24,29 @@ export default function AdminDashboard() {
     }
   ), []);
 
-  // Function to fetch all reports from our database
   const fetchReports = (isInitialLoad = false) => {
-    if (isInitialLoad) {
-      setIsLoading(true);
-    }
+    if (isInitialLoad) setIsLoading(true);
     
     fetch('/api/getReports')
       .then((res) => res.json())
       .then((data) => {
         setReports(data);
-        if (isInitialLoad) {
-          setIsLoading(false);
-        }
+        if (isInitialLoad) setIsLoading(false);
       })
       .catch((err) => {
         setError(err.message);
-        if (isInitialLoad) {
-          setIsLoading(false);
-        }
+        if (isInitialLoad) setIsLoading(false);
       });
   };
 
-  // --- useEffect hook with polling ---
   useEffect(() => {
     if (status === 'authenticated' && session.user.role === 'admin') {
-      // 1. Fetch reports immediately on load
       fetchReports(true);
-
-      // 2. Set up an interval to silently refresh reports every 30 seconds
-      // This will automatically pick up new official alerts from the Cron Job
-      // and new user-submitted reports.
       const intervalId = setInterval(() => fetchReports(false), REFRESH_INTERVAL_MS);
-
-      // 3. Clean up the interval
       return () => clearInterval(intervalId);
     }
   }, [session, status]);
 
-  // --- API Call Functions for Admin Buttons ---
   const callReportAPI = async (endpoint, id) => {
     await fetch(endpoint, {
       method: 'POST',
@@ -75,11 +60,34 @@ export default function AdminDashboard() {
   const handleReject = (id) => callReportAPI('/api/rejectReport', id);
   const handleResolve = (id) => callReportAPI('/api/resolveReport', id);
 
+  // This is the manual button to fetch IMD data
+  const handleFetchOfficial = async () => {
+    setIsRefreshing(true);
+    setRefreshMessage('Checking for new alerts...');
+    try {
+      const response = await fetch('/api/fetchOfficialData');
+      const data = await response.json();
+      
+      if (!response.ok) throw new Error(data.message || 'Failed to fetch');
+      
+      setRefreshMessage(data.message); // Show "Added 0 new reports."
+      fetchReports(); // Refresh the main table to include new alerts
+    } catch (err) {
+      setRefreshMessage(`Error: ${err.message}`);
+    }
+    
+    setTimeout(() => {
+      setIsRefreshing(false);
+      setRefreshMessage('');
+    }, 5000);
+  };
+
   // --- Session Check ---
   if (status === 'loading') {
     return <p className="text-center p-10 text-white">Loading...</p>;
   }
   if (status === 'unauthenticated' || (session && session.user.role !== 'admin')) {
+    // ... (Access Denied block) ...
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-900">
         <div className="p-10 text-center bg-slate-800 rounded-lg shadow-md">
@@ -96,7 +104,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // Filter reports that have a location for the map
   const reportsWithLocation = reports.filter(report => 
     report.location && report.location.coordinates
   );
@@ -115,8 +122,26 @@ export default function AdminDashboard() {
       
       <main>
         
-        {/* --- "System Controls" panel is REMOVED --- */}
-
+        {/* --- System Controls Panel --- */}
+        <div className="mb-6 bg-slate-800 rounded-lg shadow-lg p-6">
+          <h2 className="text-2xl font-semibold mb-4 text-white">System Controls</h2>
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={handleFetchOfficial}
+              disabled={isRefreshing}
+              className="px-5 py-2 font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:bg-gray-500"
+            >
+              {isRefreshing ? 'Checking...' : 'Refresh Official Alerts'}
+            </button>
+            {refreshMessage && (
+              <p className="text-slate-300">{refreshMessage}</p>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 mt-2">
+            Note: Official alerts are only fetched when you click this button (or when the automated Cron Job runs on the live server).
+          </p>
+        </div>
+        
         {/* --- Report Map --- */}
         <div className="mb-6 bg-slate-800 rounded-lg shadow-lg p-6">
           <h2 className="text-2xl font-semibold mb-4 text-white">Report Map</h2>
@@ -125,7 +150,7 @@ export default function AdminDashboard() {
 
         {/* --- All Reports Table --- */}
         <div className="bg-slate-800 rounded-lg shadow-lg p-6">
-          <h2 className="text-2xl font-semibold mb-4 text-white">All Reports (Auto-refreshes every 30s)</h2>
+          <h2 className="text-2xl font-semibold mb-4 text-white">All Reports (Auto-refreshes user reports every 30s)</h2>
           
           {isLoading && <p className="text-slate-300">Loading reports...</p>}
           {error && <p className="text-red-500">{error}</p>}
@@ -137,9 +162,9 @@ export default function AdminDashboard() {
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Image</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Hazard Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Description</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Location</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">AI Labels</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Source</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-300 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -147,7 +172,7 @@ export default function AdminDashboard() {
                 <tbody className="bg-slate-800 divide-y divide-slate-700">
                   {reports.map((report) => (
                     <tr key={report._id}>
-                      {/* --- Status Cell --- */}
+                      {/* Status */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                           report.status === 'verified' ? 'bg-green-900 text-green-200' :
@@ -157,7 +182,7 @@ export default function AdminDashboard() {
                           {report.status}
                         </span>
                       </td>
-                      {/* --- Image Cell --- */}
+                      {/* Image */}
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         {report.imageUrl ? (
                           <a href={report.imageUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">
@@ -165,18 +190,15 @@ export default function AdminDashboard() {
                           </a>
                         ) : (<span className="text-slate-500">N/A</span>)}
                       </td>
-                      {/* --- Description Cell --- */}
+                      {/* --- HAZARD TYPE (FIX 1) --- */}
+                      <td className="px-6 py-4 text-sm text-slate-200 font-medium">{report.hazardType || 'N/A'}</td>
+                      {/* Description */}
                       <td className="px-6 py-4 text-sm text-slate-200">{report.description}</td>
-                      {/* --- Location (Place Name) Cell --- */}
+                      {/* Location (Place Name) */}
                       <td className="px-6 py-4 text-sm text-slate-400">{report.locationName || 'N/A'}</td>
-                      {/* --- AI LABELS CELL --- */}
-                      <td className="px-6 py-4 text-sm text-slate-400">
-                        {report.aiVerification && report.aiVerification.labels ? report.aiVerification.labels.join(', ') : 'N/A'}
-                      </td>
-                      {/* --- Source Cell --- */}
+                      {/* Source */}
                       <td className="px-6 py-4 text-sm text-slate-400">{report.source || 'user'}</td>
-                      
-                      {/* --- ACTIONS CELL --- */}
+                      {/* Actions */}
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         {report.status === 'pending' && (
                           <div className="flex space-x-2">
